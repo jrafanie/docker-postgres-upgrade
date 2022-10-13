@@ -1,5 +1,8 @@
 #!/bin/bash
 set -e
+set -x
+
+PATH=$PGBINNEW:$PATH
 
 if [ "$#" -eq 0 -o "${1:0:1}" = '-' ]; then
 	set -- pg_upgrade "$@"
@@ -7,16 +10,26 @@ fi
 
 if [ "$1" = 'pg_upgrade' -a "$(id -u)" = '0' ]; then
 	mkdir -p "$PGDATAOLD" "$PGDATANEW"
+
+	# Hack, we're using a tar'd up data directory so we wrongly captured the existing configuration files too
+	# So, we need to extract, remove the conf files, mv to the right location,
+	# and put in basic postgresql.conf and pg_hba.conf files.
+	tar --same-owner -xf data_pg10.tar.gz
+	rm -vf data/*.conf
+	mv data/* $PGDATAOLD
+	cp $PGBINOLD/../share/postgresql.conf.sample $PGDATAOLD/postgresql.conf
+	echo "local all all trust" > $PGDATAOLD/pg_hba.conf
+
 	chmod 700 "$PGDATAOLD" "$PGDATANEW"
 	chown postgres .
 	chown -R postgres "$PGDATAOLD" "$PGDATANEW"
-	exec gosu postgres "$BASH_SOURCE" "$@"
+
 fi
 
 if [ "$1" = 'pg_upgrade' ]; then
 	if [ ! -s "$PGDATANEW/PG_VERSION" ]; then
-		PGDATA="$PGDATANEW" eval "initdb $POSTGRES_INITDB_ARGS"
+		PGDATA="$PGDATANEW" su postgres -c "eval initdb --encoding=UTF8 --locale=en_US.UTF-8"
 	fi
 fi
 
-exec "$@"
+su postgres -c "$@ --verbose --link"
